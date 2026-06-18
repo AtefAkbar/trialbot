@@ -1,0 +1,13 @@
+{
+  "expo": {
+    "name": "CopyTrader",
+    "slug": "copytrader",
+    "version": "1.0.0",
+    "orientation": "default",
+    "backgroundColor": "#000000",
+    "userInterfaceStyle": "dark",
+    "ios": { "supportsTablet": true },
+    "android": {},
+    "web": {}
+  }
+}

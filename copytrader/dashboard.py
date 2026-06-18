@@ -232,6 +232,13 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/" or path.startswith("/index"):
             if self._require_auth():
                 self._send(PAGE, "text/html; charset=utf-8")
+        # ---- PWA assets: public (non-sensitive) so install works on the login page ----
+        elif path.startswith("/manifest"):
+            self._send(MANIFEST, "application/manifest+json")
+        elif path.startswith("/sw.js"):
+            self._send(SW, "application/javascript")
+        elif path.startswith("/icon.svg"):
+            self._send(ICON, "image/svg+xml")
         else:
             self.send_response(404)
             self.end_headers()
@@ -309,9 +316,42 @@ LOGIN_PAGE = """<!DOCTYPE html>
 </body>
 </html>"""
 
+# ---- PWA assets (installable phone app: Add to Home Screen) ----
+MANIFEST = json.dumps({
+    "name": "PM Copy-Trader Terminal", "short_name": "CopyTrader",
+    "description": "Polymarket copy-trading paper terminal",
+    "start_url": "/", "display": "standalone", "orientation": "any",
+    "background_color": "#000000", "theme_color": "#ffae00",
+    "icons": [{"src": "/icon.svg", "sizes": "any", "type": "image/svg+xml",
+               "purpose": "any maskable"}],
+})
+
+SW = r"""const C='ct-v2';
+self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['/','/icon.svg','/manifest.webmanifest'])));self.skipWaiting();});
+self.addEventListener('activate',e=>{self.clients.claim();});
+self.addEventListener('fetch',e=>{const u=new URL(e.request.url);
+  if(u.pathname.startsWith('/api/'))return;          // live data always hits network
+  e.respondWith(fetch(e.request).then(r=>{const cp=r.clone();caches.open(C).then(c=>c.put(e.request,cp));return r;}).catch(()=>caches.match(e.request)));});
+"""
+
+ICON = r"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+<rect width="512" height="512" rx="96" fill="#0a0a0a"/>
+<rect x="28" y="28" width="456" height="456" rx="72" fill="none" stroke="#ffae00" stroke-width="14"/>
+<polyline points="80,330 150,300 200,330 260,250 320,280 380,170 432,150" fill="none" stroke="#19ff7a" stroke-width="16" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="256" y="430" font-family="monospace" font-size="120" font-weight="bold" fill="#ffae00" text-anchor="middle">PM</text>
+</svg>
+"""
+
 PAGE = r"""<!DOCTYPE html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>PM COPY-TRADER // TERMINAL</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#ffae00">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="CopyTrader">
+<link rel="apple-touch-icon" href="/icon.svg">
+<link rel="icon" href="/icon.svg">
 <style>
   :root{--bg:#000;--panel:#0a0a0a;--panel2:#0d0d07;--amber:#ffae00;--amber2:#7a5400;
         --grn:#19ff7a;--red:#ff3b3b;--dim:#6a6a52;--txt:#d7d0b0;--line:#332b12;--cyan:#36d0e0;}
@@ -578,6 +618,7 @@ async function tick(){
 }
 setInterval(()=>{$('#clock').textContent=new Date().toLocaleTimeString();},1000);
 tick();setInterval(tick,4000);
+if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(()=>{});}
 </script></body></html>"""
 
 
