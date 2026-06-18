@@ -11,14 +11,52 @@ import os
 import sys
 import json
 import time
+import secrets
 import threading
 from collections import defaultdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
 
 from . import pm_data
 from .config import Config
 
 _START = time.time()
+
+# ---- auth ----------------------------------------------------------------
+_PASSWORD = os.environ.get("PASSWORD", "password123")
+_sessions: dict[str, float] = {}   # token -> created_at (epoch)
+_SESSION_TTL = 86400 * 7           # 7 days
+_sessions_lock = threading.Lock()
+
+
+def _new_session() -> str:
+    token = secrets.token_hex(32)
+    with _sessions_lock:
+        _sessions[token] = time.time()
+    return token
+
+
+def _valid_session(token: str) -> bool:
+    with _sessions_lock:
+        created = _sessions.get(token)
+    if created is None:
+        return False
+    if time.time() - created > _SESSION_TTL:
+        with _sessions_lock:
+            _sessions.pop(token, None)
+        return False
+    return True
+
+
+def _parse_cookie(raw: str) -> dict:
+    """Parse a Cookie header into a plain dict."""
+    out = {}
+    for part in raw.split(";"):
+        part = part.strip()
+        if "=" in part:
+            k, _, v = part.partition("=")
+            out[k.strip()] = v.strip()
+    return out
 
 STATE_PATH = "state.json"
 _lb_cache = {"t": 0.0, "data": []}
@@ -145,24 +183,131 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass  # quiet
 
-    def _send(self, body, ctype="application/json"):
+    # ---- helpers ---------------------------------------------------------
+
+    def _authenticated(self) -> bool:
+        raw = self.headers.get("Cookie", "")
+        cookies = _parse_cookie(raw)
+        return _valid_session(cookies.get("session", ""))
+
+    def _send(self, body, ctype="application/json", extra_headers=()):
         if isinstance(body, str):
             body = body.encode()
         self.send_response(200)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
+        for k, v in extra_headers:
+            self.send_header(k, v)
         self.end_headers()
         self.wfile.write(body)
 
+    def _redirect(self, location: str, extra_headers=()):
+        self.send_response(302)
+        self.send_header("Location", location)
+        for k, v in extra_headers:
+            self.send_header(k, v)
+        self.end_headers()
+
+    def _require_auth(self) -> bool:
+        """Return True if the request is authenticated; otherwise redirect and return False."""
+        if self._authenticated():
+            return True
+        self._redirect("/login")
+        return False
+
+    # ---- GET -------------------------------------------------------------
+
     def do_GET(self):
-        if self.path.startswith("/api/state"):
-            self._send(json.dumps(build_state(self.cfg)))
-        elif self.path == "/" or self.path.startswith("/index"):
-            self._send(PAGE, "text/html; charset=utf-8")
+        path = urlparse(self.path).path
+        if path == "/login":
+            self._send(LOGIN_PAGE, "text/html; charset=utf-8")
+        elif path.startswith("/api/state"):
+            if not self._authenticated():
+                self.send_response(401)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"error":"unauthenticated"}')
+            else:
+                self._send(json.dumps(build_state(self.cfg)))
+        elif path == "/" or path.startswith("/index"):
+            if self._require_auth():
+                self._send(PAGE, "text/html; charset=utf-8")
         else:
             self.send_response(404)
             self.end_headers()
 
+    # ---- POST ------------------------------------------------------------
+
+    def do_POST(self):
+        path = urlparse(self.path).path
+        if path == "/login":
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length).decode("utf-8", errors="replace")
+            params = parse_qs(body)
+            submitted = params.get("password", [""])[0]
+            if submitted == _PASSWORD:
+                token = _new_session()
+                cookie = (
+                    f"session={token}; Path=/; HttpOnly; SameSite=Lax; "
+                    f"Max-Age={_SESSION_TTL}"
+                )
+                self._redirect("/", extra_headers=[("Set-Cookie", cookie)])
+            else:
+                self._send(
+                    LOGIN_PAGE.replace("<!--ERROR-->",
+                        '<p class="err">Incorrect password. Try again.</p>'),
+                    "text/html; charset=utf-8",
+                )
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+
+LOGIN_PAGE = """<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>PM COPY-TRADER // LOGIN</title>
+  <style>
+    :root{--bg:#000;--amber:#ffae00;--dim:#6a6a52;--txt:#d7d0b0;--line:#332b12;--red:#ff3b3b;}
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:var(--bg);color:var(--txt);
+         font:13px/1.5 "SF Mono",Menlo,Consolas,"Courier New",monospace;
+         display:flex;align-items:center;justify-content:center;min-height:100vh;}
+    .scan{position:fixed;inset:0;pointer-events:none;z-index:50;opacity:.35;
+          background:repeating-linear-gradient(0deg,rgba(0,0,0,0) 0,rgba(0,0,0,0) 2px,rgba(0,0,0,.25) 3px);}
+    .box{border:1px solid var(--line);padding:36px 40px;width:100%;max-width:360px;background:#0a0a0a;}
+    .logo{color:var(--amber);font-weight:700;font-size:15px;letter-spacing:1px;margin-bottom:6px;}
+    .sub{color:var(--dim);font-size:11px;margin-bottom:28px;letter-spacing:.5px;}
+    label{display:block;color:var(--dim);font-size:10px;text-transform:uppercase;
+          letter-spacing:.6px;margin-bottom:6px;}
+    input[type=password]{width:100%;background:#000;border:1px solid var(--line);
+          color:var(--txt);padding:9px 10px;font:13px/1 "SF Mono",Menlo,monospace;
+          outline:none;margin-bottom:18px;}
+    input[type=password]:focus{border-color:var(--amber);}
+    button{width:100%;background:var(--amber);color:#000;border:none;padding:10px;
+           font:700 13px/1 "SF Mono",Menlo,monospace;letter-spacing:.5px;cursor:pointer;}
+    button:hover{opacity:.85;}
+    .err{color:var(--red);font-size:11px;margin-bottom:14px;}
+    .cursor{animation:blink 1s steps(2,start) infinite}
+    @keyframes blink{50%{opacity:0}}
+  </style>
+</head>
+<body>
+<div class="scan"></div>
+<div class="box">
+  <div class="logo">PM COPY-TRADER<span class="cursor">_</span></div>
+  <div class="sub">TERMINAL ACCESS &mdash; AUTHENTICATION REQUIRED</div>
+  <!--ERROR-->
+  <form method="POST" action="/login">
+    <label for="pw">Password</label>
+    <input type="password" id="pw" name="password" autofocus autocomplete="current-password">
+    <button type="submit">ENTER &rarr;</button>
+  </form>
+</div>
+</body>
+</html>"""
 
 PAGE = r"""<!DOCTYPE html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
