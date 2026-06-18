@@ -1,5 +1,23 @@
 """Engine configuration. All knobs in one place."""
-from dataclasses import dataclass
+import os
+from dataclasses import dataclass, field
+
+
+def _state_path():
+    """Where to persist state.json.
+    On ephemeral hosts (Railway/Render/Fly), point this at a mounted persistent
+    volume via env vars so the paper account survives redeploys/restarts:
+      - STATE_PATH=/data/state.json   (explicit file path), or
+      - DATA_DIR=/data                (dir; state.json is written inside it)
+    Defaults to ./state.json for local runs.
+    """
+    explicit = os.environ.get("STATE_PATH")
+    if explicit:
+        return explicit
+    data_dir = os.environ.get("DATA_DIR")
+    if data_dir:
+        return os.path.join(data_dir, "state.json")
+    return "state.json"
 
 
 @dataclass
@@ -35,5 +53,7 @@ class Config:
     rerank_interval_s: int = 3600       # refresh the top-N once an hour
 
     # --- persistence ---
-    state_path: str = "state.json"
+    # Set STATE_PATH or DATA_DIR env var to a Railway/Render/Fly volume mount so the
+    # paper account survives redeploys (ephemeral disks wipe ./state.json otherwise).
+    state_path: str = field(default_factory=_state_path)
     log_path: str = "copytrader.log"
