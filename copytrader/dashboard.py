@@ -621,7 +621,9 @@ function drawChart(h,base){
 }
 
 async function tick(){
-  try{const r=await fetch('/api/state');const d=await r.json();render(d);
+  try{const r=await fetch('/api/state');
+    if(r.status===401||r.status===403){location.href='/login';return;}  // session died -> log in again
+    const d=await r.json();render(d);
     $('#conn').textContent='● LIVE';$('#conn').className='am led';
   }catch(e){$('#conn').textContent='● DISCONNECTED';$('#conn').className='neg';}
 }
