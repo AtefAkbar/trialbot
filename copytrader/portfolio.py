@@ -145,6 +145,11 @@ class Portfolio:
             pass        # corrupt/old state -> start fresh
 
     def save(self):
+        # ensure the parent dir exists (e.g. a mounted volume path like /data) so a
+        # configured STATE_PATH doesn't silently fail to persist on cloud hosts
+        d = os.path.dirname(self.path)
+        if d:
+            os.makedirs(d, exist_ok=True)
         tmp = self.path + ".tmp"
         with open(tmp, "w") as f:
             json.dump({
