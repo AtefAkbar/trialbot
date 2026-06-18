@@ -9,7 +9,8 @@ def _state_path():
     volume via env vars so the paper account survives redeploys/restarts:
       - STATE_PATH=/data/state.json   (explicit file path), or
       - DATA_DIR=/data                (dir; state.json is written inside it)
-    Defaults to ./state.json for local runs.
+    Defaults to /app/state/state.json, which maps to the Railway persistent
+    volume mounted at /app/state so state survives redeploys automatically.
     """
     explicit = os.environ.get("STATE_PATH")
     if explicit:
@@ -17,7 +18,14 @@ def _state_path():
     data_dir = os.environ.get("DATA_DIR")
     if data_dir:
         return os.path.join(data_dir, "state.json")
-    return "state.json"
+    return "/app/state/state.json"
+
+
+def _ensure_state_dir(path):
+    """Create the directory that will hold state.json if it doesn't exist yet."""
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
 
 
 @dataclass
@@ -53,7 +61,11 @@ class Config:
     rerank_interval_s: int = 3600       # refresh the top-N once an hour
 
     # --- persistence ---
-    # Set STATE_PATH or DATA_DIR env var to a Railway/Render/Fly volume mount so the
-    # paper account survives redeploys (ephemeral disks wipe ./state.json otherwise).
+    # Defaults to /app/state/state.json (Railway persistent volume mount).
+    # Override with STATE_PATH or DATA_DIR env vars for other platforms.
     state_path: str = field(default_factory=_state_path)
     log_path: str = "copytrader.log"
+
+    def __post_init__(self):
+        # Guarantee the directory exists before the portfolio tries to read/write it.
+        _ensure_state_dir(self.state_path)
