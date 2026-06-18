@@ -326,9 +326,9 @@ MANIFEST = json.dumps({
                "purpose": "any maskable"}],
 })
 
-SW = r"""const C='ct-v2';
+SW = r"""const C='ct-v3';
 self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['/','/icon.svg','/manifest.webmanifest'])));self.skipWaiting();});
-self.addEventListener('activate',e=>{self.clients.claim();});
+self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});
 self.addEventListener('fetch',e=>{const u=new URL(e.request.url);
   if(u.pathname.startsWith('/api/'))return;          // live data always hits network
   e.respondWith(fetch(e.request).then(r=>{const cp=r.clone();caches.open(C).then(c=>c.put(e.request,cp));return r;}).catch(()=>caches.match(e.request)));});
@@ -357,7 +357,7 @@ PAGE = r"""<!DOCTYPE html><html><head><meta charset="utf-8">
         --grn:#19ff7a;--red:#ff3b3b;--dim:#6a6a52;--txt:#d7d0b0;--line:#332b12;--cyan:#36d0e0;}
   *{box-sizing:border-box}
   html,body{margin:0}
-  body{background:var(--bg);color:var(--txt);overscroll-behavior:none;
+  body{background:var(--bg);color:var(--txt);overscroll-behavior:none;overflow-x:hidden;width:100%;
        font:12px/1.35 "SF Mono",Menlo,Consolas,"Courier New",monospace;}
   /* CRT scanline overlay (fun) */
   .scan{position:fixed;inset:0;pointer-events:none;z-index:50;opacity:.35;
@@ -383,13 +383,13 @@ PAGE = r"""<!DOCTYPE html><html><head><meta charset="utf-8">
   .kpi .k{color:var(--dim);font-size:9.5px;text-transform:uppercase;letter-spacing:.6px}
   .kpi .v{font-size:17px;font-weight:700;margin-top:2px;white-space:nowrap}
   /* layout */
-  .grid{display:grid;grid-template-columns:1.45fr 1fr;gap:1px;background:var(--line)}
-  .col{display:flex;flex-direction:column;gap:1px;background:var(--line)}
-  .panel{background:var(--panel)}
+  .grid{display:grid;grid-template-columns:1.45fr 1fr;gap:1px;background:var(--line);min-width:0}
+  .col{display:flex;flex-direction:column;gap:1px;background:var(--line);min-width:0}
+  .panel{background:var(--panel);min-width:0;overflow:hidden}
   .ph{color:var(--amber);background:#100b00;padding:4px 9px;font-weight:700;letter-spacing:1px;
       border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
   .ph .c{color:var(--dim);font-weight:400;font-size:10px}
-  .tw{overflow-x:auto}
+  .tw{overflow-x:auto;-webkit-overflow-scrolling:touch}
   table{width:100%;border-collapse:collapse}
   th{color:var(--dim);text-align:right;font-weight:400;font-size:9.5px;text-transform:uppercase;
      padding:3px 9px;border-bottom:1px solid var(--line);white-space:nowrap}
@@ -416,11 +416,20 @@ PAGE = r"""<!DOCTYPE html><html><head><meta charset="utf-8">
   @media(max-width:860px){
     .grid{grid-template-columns:1fr}
     .kpis{grid-template-columns:repeat(3,1fr)}
-    .v{font-size:15px}
-    .truncate{max-width:46vw}
+    .kpi .v{font-size:15px}.kpi{padding:5px 8px}
+    .truncate{max-width:42vw}
     .hide-sm{display:none}
+    th,td{padding:3px 7px}
+    .barrow{grid-template-columns:72px 1fr 56px;gap:6px}
+    .act{gap:6px}.act .rsn{min-width:56px}
+    .bar{gap:8px;font-size:11px}
+    svg{height:140px}
   }
-  @media(max-width:430px){ .kpis{grid-template-columns:repeat(2,1fr)} }
+  @media(max-width:430px){
+    .kpis{grid-template-columns:repeat(2,1fr)}
+    .kpi .v{font-size:14px}
+    .truncate{max-width:48vw}
+  }
 </style></head><body>
 <div class="scan"></div>
 <div class="bar">
