@@ -276,6 +276,7 @@ LOGIN_PAGE = """<!DOCTYPE html>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
   <title>PM COPY-TRADER // LOGIN</title>
+  <link rel="icon" href="https://logodix.com/logo/606516.jpg" type="image/jpeg">
   <style>
     :root{--bg:#000;--amber:#ffae00;--dim:#6a6a52;--txt:#d7d0b0;--line:#332b12;--red:#ff3b3b;}
     *{box-sizing:border-box;margin:0;padding:0}
@@ -352,6 +353,7 @@ PAGE = r"""<!DOCTYPE html><html><head><meta charset="utf-8">
 <meta name="apple-mobile-web-app-title" content="CopyTrader">
 <link rel="apple-touch-icon" href="/icon.svg">
 <link rel="icon" href="/icon.svg">
+<link rel="icon" href="https://logodix.com/logo/606516.jpg" type="image/jpeg">
 <style>
   :root{--bg:#000;--panel:#0a0a0a;--panel2:#0d0d07;--amber:#ffae00;--amber2:#7a5400;
         --grn:#19ff7a;--red:#ff3b3b;--dim:#6a6a52;--txt:#d7d0b0;--line:#332b12;--cyan:#36d0e0;}
