@@ -1,0 +1,18 @@
+# runtime state / logs (never commit)
+state.json
+state.json.tmp
+*.out
+*.log
+
+# macOS
+.DS_Store
+
+# python
+__pycache__/
+*.pyc
+
+# build artifacts
+copytrader.zip
+
+# unrelated project in this folder
+altcoin_backtest/

@@ -1,0 +1,8 @@
+**/__pycache__/
+**/*.pyc
+*.out
+*.log
+state.json
+state.json.tmp
+copytrader.zip
+altcoin_backtest/
