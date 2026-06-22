@@ -177,6 +177,25 @@ def build_state(cfg):
     }
 
 
+def export_state(cfg):
+    """Full, uncapped trade history for reports: every open + every closed trade."""
+    bs = build_state(cfg)
+    s = _read_state() or {}
+    name_by_wallet = {r["wallet"]: r["user_name"] for r in bs.get("leaderboard", [])}
+    closed = []
+    for c in s.get("closed", []):
+        closed.append({
+            "trader": name_by_wallet.get(c.get("wallet", ""), c.get("wallet", "")[:10]),
+            "title": c.get("title", ""), "reason": c.get("reason", ""),
+            "entry": c.get("entry", 0.0), "exit": c.get("exit", 0.0),
+            "shares": c.get("shares", 0.0), "pnl": c.get("pnl", 0.0),
+        })
+    return {
+        "account_size": bs["account_size"], "kpis": bs["kpis"],
+        "uptime": bs.get("uptime"), "open": bs["positions"], "closed": closed,
+    }
+
+
 class Handler(BaseHTTPRequestHandler):
     cfg = Config()
 
@@ -229,6 +248,14 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(b'{"error":"unauthenticated"}')
             else:
                 self._send(json.dumps(build_state(self.cfg)))
+        elif path.startswith("/api/export"):
+            if not self._authenticated():
+                self.send_response(401)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"error":"unauthenticated"}')
+            else:
+                self._send(json.dumps(export_state(self.cfg)))
         elif path == "/" or path.startswith("/index"):
             if self._require_auth():
                 self._send(PAGE, "text/html; charset=utf-8")

@@ -9,8 +9,9 @@ def _state_path():
     volume via env vars so the paper account survives redeploys/restarts:
       - STATE_PATH=/data/state.json   (explicit file path), or
       - DATA_DIR=/data                (dir; state.json is written inside it)
-    Defaults to /app/state/state.json, which maps to the Railway persistent
-    volume mounted at /app/state so state survives redeploys automatically.
+    Defaults to ./state.json for local runs (no absolute path, so it never tries
+    to write to a read-only/non-existent dir like /app on machines without it).
+    Production sets STATE_PATH=/data/state.json (its mounted volume) via env var.
     """
     explicit = os.environ.get("STATE_PATH")
     if explicit:
@@ -18,7 +19,7 @@ def _state_path():
     data_dir = os.environ.get("DATA_DIR")
     if data_dir:
         return os.path.join(data_dir, "state.json")
-    return "/app/state/state.json"
+    return "state.json"
 
 
 def _ensure_state_dir(path):
