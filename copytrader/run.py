@@ -1,8 +1,9 @@
 """Entrypoint.
 
-  python -m copytrader.run            # run the closed loop forever (paper)
-  python -m copytrader.run --once     # a single cycle (smoke test)
-  python -m copytrader.run --traders  # just print the live top-N, no engine
+  python -m copytrader.run             # run the closed loop forever (paper)
+  python -m copytrader.run --once      # a single cycle (smoke test)
+  python -m copytrader.run --traders   # just print the live top-N, no engine
+  python -m copytrader.run --close-all # liquidate all open positions now
 """
 import sys
 import logging
@@ -28,7 +29,7 @@ def main():
         return
 
     _setup_logging(cfg.log_path)
-    Engine(cfg).run(once="--once" in sys.argv)
+    Engine(cfg).run(once="--once" in sys.argv, close_all="--close-all" in sys.argv)
 
 
 if __name__ == "__main__":

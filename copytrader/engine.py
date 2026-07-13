@@ -150,10 +150,41 @@ class Engine:
                 self.portfolio.close(p["wallet"], p["asset"], px, "take_profit")
                 log.info("TAKE-PROFIT '%s' @ %.3f", p.get("title", "")[:40], px)
 
+    # ---- liquidate everything -------------------------------------------------
+    def close_all(self, reason="manual_close_all"):
+        """Close every open position at the current market price, right now.
+
+        Used to immediately liquidate the whole book and lock in P&L instead of
+        waiting for stop-loss/take-profit levels or normal mirror-exit signals.
+        """
+        positions = list(self.portfolio.positions.values())
+        if not positions:
+            log.info("close_all: no open positions to close")
+            return
+
+        log.info("close_all: closing %d open position(s)", len(positions))
+        for p in positions:
+            price = self._price(p["asset"], p.get("cur_price") or p["entry"])
+            self.portfolio.close(p["wallet"], p["asset"], price, reason)
+            log.info("CLOSE-ALL '%s' @ %.3f", p.get("title", "")[:40], price)
+
+        self.portfolio.record_equity(time.time())
+        self.portfolio.save()
+        s = self.portfolio.summary()
+        log.info("close_all done: cash=$%.2f equity=$%.2f open=%d exposure=$%.2f "
+                 "uPnL=$%.2f rPnL=$%.2f",
+                 s["cash"], s["equity"], s["open_positions"],
+                 s["open_notional"], s["unrealized"], s["realized"])
+
     # ---- run loop ------------------------------------------------------------
-    def run(self, once=False):
+    def run(self, once=False, close_all=False):
         log.info("copytrader starting — PAPER ONLY, account=$%.0f, risk/copy=%.1f%%",
                  self.cfg.account_size, self.cfg.risk_per_copy * 100)
+
+        if close_all:
+            self.close_all()
+            return
+
         while True:
             try:
                 self.cycle()
