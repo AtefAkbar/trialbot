@@ -34,6 +34,11 @@ class Engine:
         self.control = control
         self.scanner = []          # last scan ranking, surfaced to the dashboard
         self.halt_reason = ""
+        # ---- heartbeat / diagnostics for the dashboard runtime indicator ----
+        self.cycles = 0
+        self.last_cycle_t = 0.0
+        self.universe_size = 0
+        self.started_t = time.time()
 
     # ---- pricing -------------------------------------------------------------
     def _price(self, symbol, fallback=0.0):
@@ -47,6 +52,7 @@ class Engine:
     def cycle(self):
         now = time.time()
         self.universe.refresh()
+        self.universe_size = len(self.universe.symbols())
 
         if self.control.take_flatten():
             self._flatten_all()
@@ -59,6 +65,8 @@ class Engine:
 
         self.portfolio.record_equity(now)
         self.portfolio.save()
+        self.cycles += 1
+        self.last_cycle_t = time.time()
         s = self.portfolio.summary()
         log.info("[%s] equity=$%.2f bal=$%.2f open=%d exposure=$%.2f uPnL=$%.2f rPnL=$%.2f %s",
                  self.cfg.mode, s["equity"], s["balance"], s["open_positions"],

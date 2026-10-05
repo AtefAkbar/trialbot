@@ -1,0 +1,67 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  margin: 0;
+  background: #000000;
+  font-family: 'SFMono-Regular', 'SF Mono', 'Menlo', 'Consolas',
+    'Liberation Mono', ui-monospace, monospace;
+  -webkit-font-smoothing: antialiased;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Everything is monospace + tabular in a terminal. */
+* {
+  font-variant-numeric: tabular-nums;
+}
+
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Blinking status dot / cursor. */
+@keyframes bbg-blink {
+  0%, 55% { opacity: 1; }
+  56%, 100% { opacity: 0.15; }
+}
+.bbg-blink {
+  animation: bbg-blink 1.4s steps(1) infinite;
+}
+
+/* Thin amber-tinted scrollbars. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: #000;
+}
+::-webkit-scrollbar-thumb {
+  background: #2a2a2a;
+  border: 2px solid #000;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #ff9800;
+}
+
+/* Kill number-input spinners — terminals don't use them. */
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type='number'] {
+  -moz-appearance: textfield;
+}
+
+/* Selection in amber. */
+::selection {
+  background: #ff9800;
+  color: #000;
+}

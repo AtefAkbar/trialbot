@@ -70,6 +70,27 @@ def _read_state():
         return None
 
 
+def _engine_heartbeat(cfg):
+    """Live runtime status for the dashboard indicator. running=True only if the
+    engine completed a cycle recently (within 3x the poll interval, min 180s)."""
+    now = time.time()
+    if not ENGINE:
+        return {"attached": False, "running": False, "cycles": 0, "age": None,
+                "universe": 0, "poll": cfg.poll_interval_s}
+    last = getattr(ENGINE, "last_cycle_t", 0.0)
+    age = (now - last) if last else None
+    fresh = max(180, 3 * cfg.poll_interval_s)
+    return {
+        "attached": True,
+        "running": bool(last) and age is not None and age < fresh,
+        "cycles": getattr(ENGINE, "cycles", 0),
+        "age": age,
+        "universe": getattr(ENGINE, "universe_size", 0),
+        "poll": cfg.poll_interval_s,
+        "started": getattr(ENGINE, "started_t", now),
+    }
+
+
 def build_state(cfg):
     s = _read_state()
     base = cfg.account_size
@@ -78,6 +99,7 @@ def build_state(cfg):
     scanner = ENGINE.scanner if ENGINE else []
     halt = ENGINE.halt_reason if ENGINE else ""
     ctrl = CONTROL.snapshot()
+    engine = _engine_heartbeat(cfg)
 
     empty_kpis = {"equity": base, "balance": base, "open_notional": 0, "unrealized": 0,
                   "realized": 0, "open_positions": 0, "closed_trades": 0, "win_rate": 0,
@@ -85,9 +107,9 @@ def build_state(cfg):
                   "day_pnl": 0, "best": 0, "worst": 0}
     if not s:
         return {"live": False, "mode": mode, "account_size": base, "halt": halt,
-                "control": ctrl, "scanner": scanner, "positions": [], "closed": [],
-                "history": [], "activity": [], "updated": time.time(), "uptime": uptime,
-                "kpis": empty_kpis}
+                "control": ctrl, "scanner": scanner, "engine": engine, "positions": [],
+                "closed": [], "history": [], "activity": [], "updated": time.time(),
+                "uptime": uptime, "kpis": empty_kpis}
 
     positions = []
     open_notional = unrealized = 0.0
@@ -142,7 +164,8 @@ def build_state(cfg):
 
     return {
         "live": True, "mode": mode, "account_size": base, "halt": halt,
-        "control": ctrl, "scanner": scanner, "updated": time.time(), "uptime": uptime,
+        "control": ctrl, "scanner": scanner, "engine": engine,
+        "updated": time.time(), "uptime": uptime,
         "positions": positions, "closed": list(reversed(closed_all))[:40],
         "activity": activity, "history": history[-400:],
         "kpis": {
@@ -253,7 +276,8 @@ class Handler(BaseHTTPRequestHandler):
         body = self.rfile.read(length).decode("utf-8", errors="replace") if length else ""
         if path == "/login":
             params = parse_qs(body)
-            if params.get("password", [""])[0] == _PASSWORD:
+            # strip whitespace so a copy-pasted password with a stray space/newline still works
+            if params.get("password", [""])[0].strip() == _PASSWORD.strip():
                 token = _new_session()
                 cookie = f"session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={_SESSION_TTL}"
                 self._redirect("/", extra_headers=[("Set-Cookie", cookie)])
@@ -275,12 +299,18 @@ LOGIN_PAGE = """<!DOCTYPE html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>BYBIT BOT // LOGIN</title>
 <style>
-  :root{--bg:#05070a;--accent:#16d39a;--dim:#5a6b78;--txt:#cfe3e0;--line:#16242e;--red:#ff4d5e;}
+  :root{--bg:#100613;--accent:#ff4da6;--coral:#ff7a59;--dim:#a585b0;--txt:#f6e4f1;--line:#3a1f3c;--red:#ff4d6d;}
   *{box-sizing:border-box;margin:0;padding:0}
-  body{background:var(--bg);color:var(--txt);font:13px/1.5 "SF Mono",Menlo,Consolas,monospace;
+  body{background:
+        radial-gradient(700px 400px at 50% -10%, rgba(255,77,166,.18), transparent),
+        var(--bg);
+       color:var(--txt);font:13px/1.5 "SF Mono",Menlo,Consolas,monospace;
        display:flex;align-items:center;justify-content:center;min-height:100vh;}
-  .box{border:1px solid var(--line);padding:36px 40px;width:100%;max-width:360px;background:#0a0f14;border-radius:8px;}
-  .logo{color:var(--accent);font-weight:700;font-size:16px;letter-spacing:1px;margin-bottom:6px;}
+  .box{border:1px solid var(--line);padding:36px 40px;width:100%;max-width:360px;
+       background:#1a0c21;border-radius:14px;box-shadow:0 0 40px rgba(255,77,166,.18);}
+  .logo{font-weight:700;font-size:18px;letter-spacing:1px;margin-bottom:6px;
+       background:linear-gradient(90deg,var(--accent),var(--coral));
+       -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;}
   .sub{color:var(--dim);font-size:11px;margin-bottom:28px;}
   label{display:block;color:var(--dim);font-size:10px;text-transform:uppercase;margin-bottom:6px;}
   input{width:100%;background:#05070a;border:1px solid var(--line);color:var(--txt);
@@ -303,8 +333,8 @@ LOGIN_PAGE = """<!DOCTYPE html><html><head><meta charset="utf-8">
 
 MANIFEST = json.dumps({
     "name": "Bybit Bot Terminal", "short_name": "BybitBot",
-    "start_url": "/", "display": "standalone", "background_color": "#05070a",
-    "theme_color": "#16d39a",
+    "start_url": "/", "display": "standalone", "background_color": "#100613",
+    "theme_color": "#ff4da6",
     "icons": [{"src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"}],
 })
 
@@ -317,10 +347,12 @@ self.addEventListener('fetch',e=>{const u=new URL(e.request.url);
 """
 
 ICON = r"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-<rect width="512" height="512" rx="96" fill="#0a0f14"/>
-<rect x="28" y="28" width="456" height="456" rx="72" fill="none" stroke="#16d39a" stroke-width="14"/>
-<polyline points="80,340 160,300 220,330 290,230 350,260 432,140" fill="none" stroke="#16d39a" stroke-width="18" stroke-linejoin="round" stroke-linecap="round"/>
-<text x="256" y="440" font-family="monospace" font-size="90" font-weight="bold" fill="#16d39a" text-anchor="middle">BYBIT</text>
+<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+<stop offset="0" stop-color="#ff4da6"/><stop offset="1" stop-color="#ff7a59"/></linearGradient></defs>
+<rect width="512" height="512" rx="96" fill="#1a0c21"/>
+<rect x="28" y="28" width="456" height="456" rx="72" fill="none" stroke="url(#g)" stroke-width="14"/>
+<polyline points="80,340 160,300 220,330 290,230 350,260 432,140" fill="none" stroke="url(#g)" stroke-width="18" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="256" y="440" font-family="monospace" font-size="90" font-weight="bold" fill="url(#g)" text-anchor="middle">BYBIT</text>
 </svg>
 """
 
@@ -328,24 +360,43 @@ PAGE = r"""<!DOCTYPE html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>BYBIT BOT // TERMINAL</title>
 <link rel="manifest" href="/manifest.webmanifest">
-<meta name="theme-color" content="#16d39a">
+<meta name="theme-color" content="#ff4da6">
 <link rel="apple-touch-icon" href="/icon.svg"><link rel="icon" href="/icon.svg">
 <style>
-  :root{--bg:#05070a;--panel:#0a0f14;--accent:#16d39a;--grn:#16d39a;--red:#ff4d5e;
-        --amber:#ffb547;--dim:#5a6b78;--txt:#cfe3e0;--line:#16242e;--cyan:#36c5e0;--blue:#3b82f6;}
+  :root{--bg:#100613;--panel:#1a0c21;--panel2:#220f2b;--accent:#ff4da6;--accent2:#ff8fc7;
+        --coral:#ff7a59;--grn:#3ddc97;--red:#ff4d6d;--amber:#ffc24d;--dim:#a585b0;
+        --txt:#f6e4f1;--line:#3a1f3c;--cyan:#7af0ff;--blue:#9b8cff;}
   *{box-sizing:border-box}html,body{margin:0}
-  body{background:var(--bg);color:var(--txt);overflow-x:hidden;
+  body{background:
+        radial-gradient(900px 500px at 100% -5%, rgba(255,122,89,.10), transparent),
+        radial-gradient(900px 600px at -5% 0%, rgba(255,77,166,.12), transparent),
+        var(--bg);
+       color:var(--txt);overflow-x:hidden;
        font:12px/1.4 "SF Mono",Menlo,Consolas,monospace;}
-  .bar{display:flex;align-items:center;gap:12px;background:#0a0f14;flex-wrap:wrap;
-       border-bottom:2px solid var(--accent);padding:8px 12px;font-weight:700;}
-  .bar .logo{color:var(--accent);font-size:14px;letter-spacing:.5px}
-  .badge{padding:2px 8px;border-radius:3px;font-size:10px;font-weight:700;letter-spacing:.5px}
-  .badge.testnet{background:#13343b;color:var(--cyan);border:1px solid var(--cyan)}
-  .badge.paper{background:#2a2410;color:var(--amber);border:1px solid var(--amber)}
-  .badge.live{background:#3a1118;color:var(--red);border:1px solid var(--red)}
-  .badge.halt{background:#3a1118;color:var(--red);border:1px solid var(--red)}
+  .glow{text-shadow:0 0 10px rgba(255,77,166,.6)}
+  .bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+       background:linear-gradient(90deg,#2a0f2e,#1a0c21 60%);
+       border-bottom:2px solid var(--accent);box-shadow:0 0 18px rgba(255,77,166,.25);
+       padding:8px 12px;font-weight:700;}
+  .bar .logo{font-size:14px;letter-spacing:.5px;
+       background:linear-gradient(90deg,var(--accent),var(--coral));
+       -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;}
+  .badge{padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;letter-spacing:.5px}
+  .badge.testnet{background:rgba(122,240,255,.12);color:var(--cyan);border:1px solid var(--cyan)}
+  .badge.paper{background:rgba(255,194,77,.12);color:var(--amber);border:1px solid var(--amber)}
+  .badge.live{background:rgba(255,77,109,.14);color:var(--red);border:1px solid var(--red)}
+  .badge.halt{background:rgba(255,77,109,.14);color:var(--red);border:1px solid var(--red)}
   .bar .sp{flex:1}
   .led{animation:pulse 1.6s ease-in-out infinite}@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+  /* live runtime indicator */
+  .runtime{display:flex;align-items:center;gap:7px;padding:3px 11px;border-radius:12px;
+       font-size:11px;font-weight:700;border:1px solid var(--line);background:rgba(255,255,255,.03)}
+  .runtime.on{border-color:var(--grn);color:var(--grn);box-shadow:0 0 12px rgba(61,220,151,.35)}
+  .runtime.off{border-color:var(--red);color:var(--red)}
+  .runtime .dot{width:9px;height:9px;border-radius:50%;background:currentColor}
+  .runtime.on .dot{animation:beat 1.2s ease-in-out infinite}
+  @keyframes beat{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.5);opacity:.5}}
+  .runtime .sub{color:var(--dim);font-weight:400}
   .btn{background:#13242e;border:1px solid var(--line);color:var(--txt);padding:5px 11px;
        border-radius:4px;cursor:pointer;font:11px/1 monospace;font-weight:700}
   .btn:hover{border-color:var(--accent)}
@@ -358,7 +409,8 @@ PAGE = r"""<!DOCTYPE html><html><head><meta charset="utf-8">
   .grid{display:grid;grid-template-columns:1.5fr 1fr;gap:1px;background:var(--line)}
   .col{display:flex;flex-direction:column;gap:1px;background:var(--line);min-width:0}
   .panel{background:var(--panel);min-width:0;overflow:hidden}
-  .ph{color:var(--accent);background:#0c141a;padding:6px 11px;font-weight:700;letter-spacing:.6px;
+  .ph{color:var(--accent);background:linear-gradient(90deg,#260f2c,#1a0c21);padding:6px 11px;
+      font-weight:700;letter-spacing:.6px;
       border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
   .ph .c{color:var(--dim);font-weight:400;font-size:10px}
   .tw{overflow-x:auto}table{width:100%;border-collapse:collapse}
@@ -397,13 +449,14 @@ PAGE = r"""<!DOCTYPE html><html><head><meta charset="utf-8">
   @media(max-width:440px){.kpis{grid-template-columns:repeat(2,1fr)}}
 </style></head><body>
 <div class="bar">
-  <span class="logo">⚡ BYBIT BOT</span>
+  <span class="logo glow">✦ BYBIT BOT</span>
   <span id="modebadge" class="badge testnet">TESTNET</span>
   <span id="haltbadge" style="display:none" class="badge halt">HALTED</span>
+  <span id="runtime" class="runtime off"><span class="dot"></span><span id="rtlabel">CONNECTING</span>
+    <span class="sub" id="rtsub"></span></span>
   <span class="sp"></span>
   <button class="btn" id="pausebtn" onclick="ctl('pause')">⏸ PAUSE</button>
   <button class="btn danger" onclick="if(confirm('Close ALL open positions now?'))ctl('flatten')">✕ FLATTEN</button>
-  <span id="conn" class="led" style="color:var(--accent)">● LIVE</span>
   <span id="clock" class="mut"></span>
 </div>
 
@@ -508,6 +561,20 @@ function render(d){
   $('#pausebtn').textContent=(d.control&&d.control.paused)?'▶ RESUME':'⏸ PAUSE';
   $('#pausebtn').onclick=()=>ctl((d.control&&d.control.paused)?'resume':'pause');
 
+  // ---- live runtime indicator (engine heartbeat) ----
+  const e=d.engine||{};
+  const rt=$('#runtime');
+  if(e.running){
+    rt.className='runtime on';
+    $('#rtlabel').textContent='ENGINE LIVE';
+    const age=e.age==null?'':' · '+(e.age<60?Math.round(e.age)+'s':dur(e.age))+' ago';
+    $('#rtsub').textContent='cycle #'+(e.cycles||0)+age+' · '+(e.universe||0)+' symbols';
+  }else{
+    rt.className='runtime off';
+    $('#rtlabel').textContent=e.attached?'ENGINE STALE':'NO ENGINE';
+    $('#rtsub').textContent=e.attached?('last cycle '+(e.age!=null?dur(e.age)+' ago':'never')):'dashboard-only';
+  }
+
   $('#kpis').innerHTML=[
     kpi('Equity',m2(k.equity),'am'),
     kpi('Total P&L',`${arr(tot)} ${m2(tot)}`,sgn(tot)),
@@ -595,21 +662,23 @@ function drawChart(h,base){
   if(hi-lo<1e-6){hi+=1;lo-=1;}
   const x=i=>pad+i*(W-2*pad)/(h.length-1),y=v=>H-pad-(v-lo)/(hi-lo)*(H-2*pad);
   const pts=eq.map((v,i)=>x(i).toFixed(1)+','+y(v).toFixed(1)).join(' ');
-  const last=eq[eq.length-1],up=last>=base,col=up?'#16d39a':'#ff4d5e',by=y(base).toFixed(1);
-  svg.innerHTML=`<polygon points="${pad},${H-pad} ${pts} ${(W-pad)},${H-pad}" fill="${col}" opacity="0.08"/>
-    <line x1="0" y1="${by}" x2="${W}" y2="${by}" stroke="#2a3f33" stroke-dasharray="3 3"/>
-    <polyline points="${pts}" fill="none" stroke="${col}" stroke-width="1.6"/>
-    <circle cx="${x(eq.length-1)}" cy="${y(last)}" r="2.6" fill="${col}"/>
-    <text x="6" y="13" fill="#5a6b78" font-size="10">$${hi.toLocaleString(undefined,{maximumFractionDigits:0})}</text>
-    <text x="6" y="${H-4}" fill="#5a6b78" font-size="10">$${lo.toLocaleString(undefined,{maximumFractionDigits:0})}</text>`;
+  const last=eq[eq.length-1],up=last>=base,col=up?'#3ddc97':'#ff4d6d',by=y(base).toFixed(1);
+  svg.innerHTML=`<polygon points="${pad},${H-pad} ${pts} ${(W-pad)},${H-pad}" fill="${col}" opacity="0.10"/>
+    <line x1="0" y1="${by}" x2="${W}" y2="${by}" stroke="#3a1f3c" stroke-dasharray="3 3"/>
+    <polyline points="${pts}" fill="none" stroke="${col}" stroke-width="1.8"/>
+    <circle cx="${x(eq.length-1)}" cy="${y(last)}" r="2.8" fill="${col}"/>
+    <text x="6" y="13" fill="#a585b0" font-size="10">$${hi.toLocaleString(undefined,{maximumFractionDigits:0})}</text>
+    <text x="6" y="${H-4}" fill="#a585b0" font-size="10">$${lo.toLocaleString(undefined,{maximumFractionDigits:0})}</text>`;
 }
 
 async function tick(){
   try{const r=await fetch('/api/state');
     if(r.status===401||r.status===403){location.href='/login';return;}
     render(await r.json());
-    $('#conn').textContent='● LIVE';$('#conn').style.color='var(--accent)';
-  }catch(e){$('#conn').textContent='● DISCONNECTED';$('#conn').style.color='var(--red)';}
+  }catch(e){
+    const rt=$('#runtime');rt.className='runtime off';
+    $('#rtlabel').textContent='DISCONNECTED';$('#rtsub').textContent='no response from server';
+  }
 }
 setInterval(()=>{$('#clock').textContent=new Date().toLocaleTimeString();},1000);
 tick();setInterval(tick,4000);

@@ -42,27 +42,33 @@ class Universe:
         bl = set(self.cfg.symbol_blocklist)
         try:
             filters = self._instrument_filters()
-            rows = []
+            all_rows = []
             for t in self.api.tickers():
                 sym = t.get("symbol", "")
                 if not sym.endswith("USDT") or sym in bl or sym not in filters:
                     continue
                 if wl and sym not in wl:
                     continue
-                turnover = float(t.get("turnover24h", 0) or 0)
-                if not wl and turnover < self.cfg.min_turnover_usd:
-                    continue
                 step, min_qty, tick = filters[sym]
-                rows.append({
-                    "symbol": sym, "turnover": turnover,
+                all_rows.append({
+                    "symbol": sym, "turnover": float(t.get("turnover24h", 0) or 0),
                     "last": float(t.get("lastPrice", 0) or 0),
                     "lot_step": step, "min_qty": min_qty, "tick": tick,
                 })
-            rows.sort(key=lambda r: r["turnover"], reverse=True)
-            self._symbols = rows[: self.cfg.max_universe]
+            all_rows.sort(key=lambda r: r["turnover"], reverse=True)
+
+            # liquidity filter — but never end up with an EMPTY universe (e.g. on
+            # testnet, where 24h turnover is tiny and would otherwise nuke everything).
+            liquid = all_rows if wl else [r for r in all_rows if r["turnover"] >= self.cfg.min_turnover_usd]
+            if not liquid and all_rows:
+                liquid = all_rows                       # fallback: trade the most-active anyway
+                log.warning("universe: no symbol cleared the $%.0fM turnover floor — "
+                            "falling back to the top %d by turnover (testnet/low-liquidity?)",
+                            self.cfg.min_turnover_usd / 1e6, self.cfg.max_universe)
+            self._symbols = liquid[: self.cfg.max_universe]
             self._last_refresh = now
-            log.info("universe: %d liquid symbols (scanning top %d)",
-                     len(rows), len(self._symbols))
+            log.info("universe: %d tradable symbols (scanning top %d)",
+                     len(liquid), len(self._symbols))
         except Exception as e:
             log.warning("universe refresh failed (%s); keeping %d cached", e, len(self._symbols))
         return self._symbols
